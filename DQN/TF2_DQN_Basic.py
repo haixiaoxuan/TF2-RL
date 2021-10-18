@@ -37,15 +37,19 @@ class DQN:
         self.memory = deque(maxlen=memory_cap)
         self.state_shape = env.observation_space.shape
         self.time_steps = time_steps
+
+        # current state
         self.stored_states = np.zeros((self.time_steps, self.state_shape[0]))
         
         self.gamma = gamma  # discount factor
+
         self.epsilon = epsilon  # amount of randomness in e-greedy policy
         self.epsilon_min = epsilon_min
         self.epsilon_decay = epsilon_decay  # exponential decay
+
         self.learning_rate = learning_rate
         self.batch_size = batch_size
-        self.tau = tau      # target model update
+        self.tau = tau      # target model update (tau% 的权重来源于更新)
 
         self.model = self.create_model()
         self.target_model = self.create_model()
@@ -67,7 +71,7 @@ class DQN:
         self.stored_states[-1] = new_state
 
     def act(self, test=False):
-        # get action
+        # get action， if test: epsilon=0.01
         states = self.stored_states.reshape((1, self.state_shape[0]*self.time_steps))
         self.epsilon *= self.epsilon_decay
         self.epsilon = max(self.epsilon_min, self.epsilon)
@@ -82,7 +86,7 @@ class DQN:
         self.memory.append([state, action, reward, new_state, done])
 
     def replay(self):
-        # replay and train model
+        # replay and train model once
         if len(self.memory) < self.batch_size:
             return
 
@@ -91,8 +95,9 @@ class DQN:
 
         batch_states = np.array(states).reshape(self.batch_size, -1)
         batch_new_states = np.array(new_states).reshape(self.batch_size, -1)
+
         batch_target = self.target_model.predict(batch_states)
-        q_future = self.target_model.predict(batch_new_states).max(axis=1)
+        q_future = self.target_model.predict(batch_new_states).max(axis=1)  # max
 
         batch_target[range(self.batch_size), action] = reward + (1 - done) * q_future * self.gamma
         hist = self.model.fit(batch_states, batch_target, epochs=1, verbose=0)
@@ -120,6 +125,8 @@ class DQN:
 
         done, episode, steps, epoch, total_reward = True, 0, 0, 0, 0
         while episode < max_episodes:
+
+            # 超过最大步数
             if steps >= max_steps:
                 print("episode {}, reached max steps".format(episode))
                 self.save_model("dqn_basic_maxed_episode{}_time_step{}.h5".format(episode, self.time_steps))
@@ -149,6 +156,8 @@ class DQN:
             prev_stored_states = self.stored_states
             self.update_states(new_state)
             self.remember(prev_stored_states, action, reward, self.stored_states, done)
+
+            # train
             self.replay()
             self.target_update()
 
