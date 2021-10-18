@@ -45,19 +45,18 @@ class DQN:
         self.epsilon_decay = epsilon_decay  # exponential decay
         self.learning_rate = learning_rate
         self.batch_size = batch_size
-        self.tau = tau  # target model update
+        self.tau = tau      # target model update
 
         self.model = self.create_model()
         self.target_model = self.create_model()
         self.target_model.set_weights(self.model.get_weights())
 
-        self.summaries = {}
+        self.summaries = {}     # q_val|loss
 
     def create_model(self):
         model = Sequential()
         model.add(Dense(24, input_dim=self.state_shape[0]*self.time_steps, activation="relu"))
         model.add(Dense(16, activation="relu"))
-        # model.add(Dense(24, activation="relu"))
         model.add(Dense(self.env.action_space.n))
         model.compile(loss="mean_squared_error", optimizer=Adam(lr=self.learning_rate))
         return model
@@ -67,7 +66,8 @@ class DQN:
         self.stored_states = np.roll(self.stored_states, -1, axis=0)
         self.stored_states[-1] = new_state
 
-    def act(self, test=False): 
+    def act(self, test=False):
+        # get action
         states = self.stored_states.reshape((1, self.state_shape[0]*self.time_steps))
         self.epsilon *= self.epsilon_decay
         self.epsilon = max(self.epsilon_min, self.epsilon)
@@ -82,15 +82,18 @@ class DQN:
         self.memory.append([state, action, reward, new_state, done])
 
     def replay(self):
+        # replay and train model
         if len(self.memory) < self.batch_size:
             return
 
         samples = random.sample(self.memory, self.batch_size)
         states, action, reward, new_states, done = map(np.asarray, zip(*samples))
+
         batch_states = np.array(states).reshape(self.batch_size, -1)
         batch_new_states = np.array(new_states).reshape(self.batch_size, -1)
         batch_target = self.target_model.predict(batch_states)
         q_future = self.target_model.predict(batch_new_states).max(axis=1)
+
         batch_target[range(self.batch_size), action] = reward + (1 - done) * q_future * self.gamma
         hist = self.model.fit(batch_states, batch_target, epochs=1, verbose=0)
         self.summaries['loss'] = np.mean(hist.history['loss'])
@@ -103,11 +106,9 @@ class DQN:
         self.target_model.set_weights(target_weights)
 
     def save_model(self, fn):
-        # save model to file, give file name with .h5 extension
         self.model.save(fn)
 
     def load_model(self, fn):
-        # load model from .h5 file
         self.model = tf.keras.models.load_model(fn)
         self.target_model = self.create_model()
         self.target_model.set_weights(self.model.get_weights())
@@ -128,6 +129,7 @@ class DQN:
                     tf.summary.scalar('Main/episode_reward', total_reward, step=episode)
                     tf.summary.scalar('Main/episode_steps', steps, step=episode)
 
+                # 重置当前状态
                 self.stored_states = np.zeros((self.time_steps, self.state_shape[0]))
                 print("episode {}: {} reward".format(episode, total_reward))
 
@@ -138,20 +140,22 @@ class DQN:
                 self.update_states(cur_state)  # update stored states
                 episode += 1
 
-            action = self.act()  # model determine action, states taken from self.stored_states
-            new_state, reward, done, _ = self.env.step(action)  # perform action on env
+            action = self.act()
+            new_state, reward, done, _ = self.env.step(action)
+
+            # TODO
             # modified_reward = 1 - abs(new_state[2] / (np.pi / 2))  # modified for CartPole env, reward based on angle
+
             prev_stored_states = self.stored_states
-            self.update_states(new_state)  # update stored states
-            self.remember(prev_stored_states, action, reward, self.stored_states, done)  # add to memory
-            self.replay()  # iterates default (prediction) model through memory replay
-            self.target_update()  # iterates target model
+            self.update_states(new_state)
+            self.remember(prev_stored_states, action, reward, self.stored_states, done)
+            self.replay()
+            self.target_update()
 
             total_reward += reward
             steps += 1
             epoch += 1
 
-            # Tensorboard update
             with summary_writer.as_default():
                 if len(self.memory) > self.batch_size:
                     tf.summary.scalar('Stats/loss', self.summaries['loss'], step=epoch)
@@ -180,7 +184,8 @@ if __name__ == "__main__":
     env = gym.make('CartPole-v0')
     env._max_episode_steps = 500
     dqn_agent = DQN(env, time_steps=4)
+    dqn_agent.train(max_episodes=50)
+
     # dqn_agent.load_model("basic_models/time_step4/dqn_basic_episode50_time_step4.h5")
     # rewards = dqn_agent.test()
     # print("Total rewards: ", rewards)
-    dqn_agent.train(max_episodes=50)
